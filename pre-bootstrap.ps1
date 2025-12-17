@@ -44,7 +44,6 @@ if (-not $nfsFeatures) {
     throw "No NFS-related Windows features found on this system."
 }
 
-# Check if a client-capable NFS feature is already enabled
 $enabledClientFeature = $nfsFeatures |
     Where-Object {
         $_.State -eq 'Enabled' -and
@@ -59,22 +58,9 @@ if ($enabledClientFeature) {
     Write-Host ("[INFO] NFS client already enabled via feature: {0}" -f $enabledClientFeature.FeatureName)
 }
 else {
-    # Prefer client-only features if available
     $candidate =
-        $nfsFeatures | Where-Object { $_.FeatureName -eq 'ServicesForNFS-ClientOnly' } |
+        $nfsFeatures | Where-Object { $_.FeatureName -match 'ClientForNFS' } |
         Select-Object -First 1
-
-    if (-not $candidate) {
-        $candidate =
-            $nfsFeatures | Where-Object { $_.FeatureName -eq 'ServicesForNFS-Client' } |
-            Select-Object -First 1
-    }
-
-    if (-not $candidate) {
-        $candidate =
-            $nfsFeatures | Where-Object { $_.FeatureName -match 'ClientForNFS' } |
-            Select-Object -First 1
-    }
 
     if (-not $candidate) {
         throw "No suitable NFS client feature found to enable."
@@ -85,22 +71,22 @@ else {
 }
 
 # ------------------------------------------------------------
-# Configure NFS UID/GID mapping (anonymous root)
+# Configure NFS UID/GID mapping (Server-correct syntax)
 # ------------------------------------------------------------
 nfsadmin client stop
-nfsadmin client localhost config anonuid=0 anongid=0
+nfsadmin mapping localhost config anonuid=0 anongid=0
 nfsadmin client start
 
 Write-Host "[INFO] NFS UID/GID mapping configured (anonuid=0, anongid=0)"
 
 # ------------------------------------------------------------
-# Mount NFS share persistently
+# Mount NFS share persistently (PowerShell-safe)
 # ------------------------------------------------------------
 $target = "{0}:{1}" -f $NfsServer, $NfsExport
 $drive  = "{0}:" -f $MountDrive
 
 if (-not (Test-Path $drive)) {
-    mount -o anon,persistent=yes $target $drive
+    mount.exe -o anon,persistent=yes $target $drive
     Write-Host ("[INFO] Mounted {0} at {1}" -f $target, $drive)
 }
 else {
