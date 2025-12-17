@@ -31,18 +31,10 @@ if (-not $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
 Write-Host "[INFO] Administrator privileges confirmed"
 
 # ------------------------------------------------------------
-# Detect and ensure NFS client feature (robust across Server SKUs)
+# Detect and ensure NFS client feature
 # ------------------------------------------------------------
-if (-not (Get-Command Get-WindowsOptionalFeature -ErrorAction SilentlyContinue)) {
-    throw "Get-WindowsOptionalFeature is not available on this system."
-}
-
 $nfsFeatures = Get-WindowsOptionalFeature -Online |
     Where-Object { $_.FeatureName -match 'NFS' }
-
-if (-not $nfsFeatures) {
-    throw "No NFS-related Windows features found on this system."
-}
 
 $enabledClientFeature = $nfsFeatures |
     Where-Object {
@@ -58,29 +50,25 @@ if ($enabledClientFeature) {
     Write-Host ("[INFO] NFS client already enabled via feature: {0}" -f $enabledClientFeature.FeatureName)
 }
 else {
-    $candidate =
-        $nfsFeatures | Where-Object { $_.FeatureName -match 'ClientForNFS' } |
-        Select-Object -First 1
-
+    $candidate = $nfsFeatures | Where-Object { $_.FeatureName -match 'ClientForNFS' } | Select-Object -First 1
     if (-not $candidate) {
-        throw "No suitable NFS client feature found to enable."
+        throw "No suitable NFS client feature found."
     }
-
     Enable-WindowsOptionalFeature -Online -FeatureName $candidate.FeatureName -All
     Write-Host ("[INFO] Enabled NFS client feature: {0}" -f $candidate.FeatureName)
 }
 
 # ------------------------------------------------------------
-# Configure NFS UID/GID mapping (Server-correct syntax)
+# Configure NFS UID/GID mapping (correct Server syntax)
 # ------------------------------------------------------------
 nfsadmin client stop
-nfsadmin mapping localhost config anonuid=0 anongid=0
+nfsadmin mapping config anonuid=0 anongid=0
 nfsadmin client start
 
 Write-Host "[INFO] NFS UID/GID mapping configured (anonuid=0, anongid=0)"
 
 # ------------------------------------------------------------
-# Mount NFS share persistently (PowerShell-safe)
+# Mount NFS share persistently
 # ------------------------------------------------------------
 $target = "{0}:{1}" -f $NfsServer, $NfsExport
 $drive  = "{0}:" -f $MountDrive
@@ -94,13 +82,17 @@ else {
 }
 
 # ------------------------------------------------------------
-# Optional: run stage-1 bootstrap (win-bootstrap.ps1)
+# Optional: run stage-1 bootstrap
 # ------------------------------------------------------------
 if ($RunBootstrap) {
     $bootstrapScript = Join-Path $drive "win-bootstrap.ps1"
-
     if (-not (Test-Path $bootstrapScript)) {
         throw ("Bootstrap script not found: {0}" -f $bootstrapScript)
+    }
+
+    # Normalize BootstrapArgs when passed via -Command
+    if ($BootstrapArgs -and $BootstrapArgs.Count -eq 1 -and $BootstrapArgs[0] -match ',') {
+        $BootstrapArgs = $BootstrapArgs[0].Split(',')
     }
 
     Write-Host "[INFO] Launching win-bootstrap.ps1"
