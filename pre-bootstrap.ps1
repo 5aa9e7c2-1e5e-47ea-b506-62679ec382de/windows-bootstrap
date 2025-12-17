@@ -31,24 +31,57 @@ if (-not $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
 Write-Host "[INFO] Administrator privileges confirmed"
 
 # ------------------------------------------------------------
-# Ensure NFS client feature exists and is enabled (strict-safe)
+# Detect and ensure NFS client feature (robust across Server SKUs)
 # ------------------------------------------------------------
 if (-not (Get-Command Get-WindowsOptionalFeature -ErrorAction SilentlyContinue)) {
     throw "Get-WindowsOptionalFeature is not available on this system."
 }
 
-$feature = Get-WindowsOptionalFeature -Online |
-    Where-Object { $_.FeatureName -eq "ServicesForNFS-ClientOnly" }
+$nfsFeatures = Get-WindowsOptionalFeature -Online |
+    Where-Object { $_.FeatureName -match 'NFS' }
 
-if (-not $feature) {
-    throw "NFS client feature 'ServicesForNFS-ClientOnly' not found on this system."
+if (-not $nfsFeatures) {
+    throw "No NFS-related Windows features found on this system."
 }
 
-if ($feature.State -ne "Enabled") {
-    Enable-WindowsOptionalFeature -Online -FeatureName "ServicesForNFS-ClientOnly" -All
-    Write-Host "[INFO] NFS client installed"
-} else {
-    Write-Host "[INFO] NFS client already installed"
+# Check if a client-capable NFS feature is already enabled
+$enabledClientFeature = $nfsFeatures |
+    Where-Object {
+        $_.State -eq 'Enabled' -and
+        (
+            $_.FeatureName -match 'ClientForNFS' -or
+            $_.FeatureName -match 'ServerAndClient'
+        )
+    } |
+    Select-Object -First 1
+
+if ($enabledClientFeature) {
+    Write-Host ("[INFO] NFS client already enabled via feature: {0}" -f $enabledClientFeature.FeatureName)
+}
+else {
+    # Prefer client-only features if available
+    $candidate =
+        $nfsFeatures | Where-Object { $_.FeatureName -eq 'ServicesForNFS-ClientOnly' } |
+        Select-Object -First 1
+
+    if (-not $candidate) {
+        $candidate =
+            $nfsFeatures | Where-Object { $_.FeatureName -eq 'ServicesForNFS-Client' } |
+            Select-Object -First 1
+    }
+
+    if (-not $candidate) {
+        $candidate =
+            $nfsFeatures | Where-Object { $_.FeatureName -match 'ClientForNFS' } |
+            Select-Object -First 1
+    }
+
+    if (-not $candidate) {
+        throw "No suitable NFS client feature found to enable."
+    }
+
+    Enable-WindowsOptionalFeature -Online -FeatureName $candidate.FeatureName -All
+    Write-Host ("[INFO] Enabled NFS client feature: {0}" -f $candidate.FeatureName)
 }
 
 # ------------------------------------------------------------
@@ -69,7 +102,8 @@ $drive  = "{0}:" -f $MountDrive
 if (-not (Test-Path $drive)) {
     mount -o anon,persistent=yes $target $drive
     Write-Host ("[INFO] Mounted {0} at {1}" -f $target, $drive)
-} else {
+}
+else {
     Write-Host ("[INFO] Drive {0} already exists" -f $drive)
 }
 
